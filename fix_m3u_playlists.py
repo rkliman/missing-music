@@ -2,7 +2,6 @@ import os
 import difflib
 from pathlib import Path
 import curses
-import subprocess  # Import subprocess to run shell commands
 
 PLAYLIST_DIR = Path("/home/randall/Music")   # Update this
 MUSIC_DIR = Path("/home/randall/Music")          # Update this
@@ -39,7 +38,7 @@ def find_best_match_with_prompt(broken_path, candidates):
                     stdscr.addstr(4 + idx, 0, f"  {full_path} (Score: {score:.2f})")
             stdscr.addstr(4 + show_count, 0, "  [s] Skip")
             stdscr.addstr(5 + show_count, 0, "  [m] Manual entry")
-            stdscr.addstr(6 + show_count, 0, "  [r] Rip from streamrip")
+            stdscr.addstr(6 + show_count, 0, "  [a] Add to 'missing songs' file")
             if show_count < max_show_count:
                 stdscr.addstr(7 + show_count, 0, "  [v] View more matches")
             stdscr.refresh()
@@ -58,17 +57,10 @@ def find_best_match_with_prompt(broken_path, candidates):
                 curses.endwin()
                 manual = input("Enter the full replacement path: ").strip()
                 return manual if manual else None
-            elif key == ord('r'):
+            elif key == ord('a'):
                 curses.endwin()
-                # Extract artist and song from the filename
-                artist, song = os.path.splitext(filename)[0].split(" - ", 1)
-                print(f"🎵 Searching for '{artist} - {song}' on streamrip...")
-                try:
-                    # Open an interactive shell for the rip command
-                    subprocess.run(["rip", "search", "tidal", f"track '{artist} - {song}'"], check=True)
-                except subprocess.CalledProcessError as e:
-                    print(f"❌ Failed to rip song. Error: {e}")
-                return None  # Return None after attempting to rip
+                add_to_missing_songs_file(broken_path)
+                return None
             elif key == ord('v') and show_count < max_show_count:
                 show_count = min(show_count + 5, max_show_count)
 
@@ -76,16 +68,39 @@ def find_best_match_with_prompt(broken_path, candidates):
         print(f"\nBroken entry: {broken_path}")
         print("No automatic matches found.")
         new_path = input("Enter new path manually or leave blank to skip: ").strip()
+        if not new_path:
+            add_to_missing_songs_file(broken_path)
         return new_path if new_path else None
 
     return curses.wrapper(curses_menu)
+
+
+def add_to_missing_songs_file(broken_path):
+    missing_songs_file = OUTPUT_DIR / "missing_songs.txt"
+    with open(missing_songs_file, "a", encoding="utf-8") as f:
+        artist, song = parse_artist_and_song(broken_path)
+        f.write(f"{artist} - {song}\n")
+    print(f"🎵 Added to 'missing songs' file: {broken_path}")
+
+
+def parse_artist_and_song(broken_path):
+    # Attempt to parse artist and song from the filename
+    filename = os.path.basename(broken_path)
+    parts = filename.rsplit("-", 1)
+    if len(parts) == 2:
+        artist = parts[0].strip()
+        song = parts[1].rsplit(".", 1)[0].strip()
+    else:
+        artist = "Unknown Artist"
+        song = filename.rsplit(".", 1)[0].strip()
+    return artist, song
 
 def fix_playlist(m3u_path, music_files):
     playlist_base = m3u_path.parent.resolve()
     lines = []
     broken_entries = []
 
-    # First pass — collect info
+    # Load playlist
     with open(m3u_path, "r", encoding="utf-8") as f:
         for idx, line in enumerate(f):
             line = line.strip()
@@ -103,7 +118,9 @@ def fix_playlist(m3u_path, music_files):
     total_count = sum(1 for l in lines if l and not l.startswith("#"))
     print(f"🔍 Playlist: {m3u_path.name} — {len(broken_entries)} broken entries out of {total_count}\n")
 
-    # Second pass — prompt for each broken entry
+    output_path = OUTPUT_DIR / m3u_path.name
+
+    # Prompt and save after each fix
     for i, (idx, orig_line, full_path) in enumerate(broken_entries, start=1):
         print(f"Processing broken entry {i} of {len(broken_entries)}")
         match = find_best_match_with_prompt(full_path, music_files)
@@ -113,9 +130,15 @@ def fix_playlist(m3u_path, music_files):
                 lines[idx] = rel_path
             except ValueError:
                 lines[idx] = match  # fallback to absolute
-        # else leave the original line untouched
+
+            # Save playlist after this fix
+            with open(output_path, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(line + "\n")
+            print(f"💾 Saved progress to: {output_path}")
 
     return lines
+
 
 
 
@@ -123,8 +146,28 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     music_files = get_all_music_files(MUSIC_DIR)
 
-    for playlist_file in PLAYLIST_DIR.glob("*.m3u8"):
-        print(f"\n🎧 Processing playlist: {playlist_file.name}")
+    playlist_files = list(PLAYLIST_DIR.glob("*.m3u8"))
+    if not playlist_files:
+        print("No .m3u8 playlists found in the specified directory.")
+        return
+    total_playlists = len(playlist_files)
+    for idx, playlist_file in enumerate(playlist_files, start=1):
+        print(f"\n🎧 Processing playlist {idx} of {total_playlists}: {playlist_file.name}")
+        # Check for broken entries before prompting
+        with open(playlist_file, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        broken = []
+        playlist_base = playlist_file.parent.resolve()
+        for line in lines:
+            original_path = Path(line)
+            full_path = (playlist_base / original_path).resolve() if not original_path.is_absolute() else original_path
+            if not full_path.exists():
+                broken.append(line)
+        if broken:
+            user_input = input(f"Press Enter to process, or type 's' to skip this playlist: ").strip().lower()
+            if user_input == 's':
+                print(f"⏭️ Skipped playlist: {playlist_file.name}")
+                continue
         fixed = fix_playlist(playlist_file, music_files)
         output_path = OUTPUT_DIR / playlist_file.name
         with open(output_path, "w", encoding="utf-8") as f:
