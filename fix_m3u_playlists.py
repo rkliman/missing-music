@@ -120,13 +120,13 @@ def fix_playlist(m3u_path, music_files):
                 broken_entries.append((idx, line, str(full_path)))
 
     total_count = sum(1 for l in lines if l and not l.startswith("#"))
-    print(f"🔍 Playlist: {m3u_path.name} — {len(broken_entries)} broken entries out of {total_count}\n")
+    print(f"🔍 {len(broken_entries)}/{total_count} broken entries")
 
     output_path = OUTPUT_DIR / m3u_path.name
 
     # Prompt and save after each fix
     for i, (idx, orig_line, full_path) in enumerate(broken_entries, start=1):
-        print(f"Processing broken entry {i} of {len(broken_entries)}")
+        print(f"Processing broken entry {i}/{len(broken_entries)}")
         match = find_best_match_with_prompt(full_path, music_files)
         if match:
             try:
@@ -139,7 +139,7 @@ def fix_playlist(m3u_path, music_files):
             with open(output_path, "w", encoding="utf-8") as f:
                 for line in lines:
                     f.write(line + "\n")
-            print(f"💾 Saved progress to: {output_path}")
+            print(f"🔨 Fixed track to: {output_path}")
 
     return lines
 
@@ -156,7 +156,7 @@ def main():
         return
     total_playlists = len(playlist_files)
     for idx, playlist_file in enumerate(playlist_files, start=1):
-        print(f"\n🎧 Processing playlist {idx} of {total_playlists}: {playlist_file.name}")
+        print(f"\n🎧 ({idx}/{total_playlists}) Processing {playlist_file.name}")
         # Check for broken entries before prompting
         with open(playlist_file, "r", encoding="utf-8") as f:
             lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
@@ -177,7 +177,8 @@ def main():
         with open(output_path, "w", encoding="utf-8") as f:
             for line in fixed:
                 f.write(line + "\n")
-        print(f"✅ Saved fixed playlist: {output_path}")
+        if len(broken) > 0:
+            print(f"✅ Saved fixed playlist: {output_path}")
 
 if __name__ == "__main__":
     main()
