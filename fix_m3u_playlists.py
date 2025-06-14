@@ -54,9 +54,7 @@ def find_best_match_with_prompt(broken_path, candidates):
             elif key == ord('s'):
                 return None
             elif key == ord('m'):
-                curses.endwin()
-                manual = input("Enter the full replacement path: ").strip()
-                return manual if manual else None
+                return "MANUAL_ENTRY"
             elif key == ord('a'):
                 curses.endwin()
                 add_to_missing_songs_file(broken_path)
@@ -71,8 +69,14 @@ def find_best_match_with_prompt(broken_path, candidates):
         if not new_path:
             add_to_missing_songs_file(broken_path)
         return new_path if new_path else None
+    
+    selection = curses.wrapper(curses_menu)
 
-    return curses.wrapper(curses_menu)
+    if selection == "MANUAL_ENTRY":
+        manual = input("Enter the full replacement path: ").strip()
+        return manual if manual else None
+    else:
+        return selection
 
 
 def add_to_missing_songs_file(broken_path):
